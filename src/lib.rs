@@ -1,4 +1,10 @@
-use std::{convert::Infallible, error, fmt, hint, mem};
+use std::{
+    any::Any,
+    convert::Infallible,
+    error, fmt, hint, mem,
+    num::TryFromIntError,
+    panic::{self, AssertUnwindSafe},
+};
 
 pub mod napi;
 pub mod typing;
@@ -198,6 +204,217 @@ impl IntoJs for f64 {
     }
 }
 
+impl TsType for f32 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for f32 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<f64 as FromJs>::from_js(env, value)? as f32)
+    }
+}
+
+impl IntoJs for f32 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as f64, env)
+    }
+}
+
+impl TsType for i64 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for i64 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        let float: f64 = FromJs::from_js(env, value)?;
+        if float.fract() != 0.0 {
+            return Err(ConversionError::WouldDiscardFraction);
+        }
+
+        Ok(float as i64)
+    }
+}
+
+impl IntoJs for i64 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        if self as f64 as i64 != self {
+            return Err(ConversionError::IntTooLarge);
+        }
+
+        IntoJs::into_js(self as f64, env)
+    }
+}
+
+impl TsType for i32 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for i32 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<i64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for i32 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as i64, env)
+    }
+}
+
+impl TsType for i16 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for i16 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<i64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for i16 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as i64, env)
+    }
+}
+
+impl TsType for i8 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for i8 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<i64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for i8 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as i64, env)
+    }
+}
+
+impl TsType for isize {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for isize {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<i64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for isize {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as i64, env)
+    }
+}
+
+impl TsType for u64 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for u64 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<i64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for u64 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        if self as f64 as u64 != self {
+            return Err(ConversionError::IntTooLarge);
+        }
+
+        IntoJs::into_js(self as f64, env)
+    }
+}
+
+impl TsType for u32 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for u32 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<u64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for u32 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as u64, env)
+    }
+}
+
+impl TsType for u16 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for u16 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<u64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for u16 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as u64, env)
+    }
+}
+
+impl TsType for u8 {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for u8 {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<u64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for u8 {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as u64, env)
+    }
+}
+
+impl TsType for usize {
+    fn ts_type() -> Type {
+        Type::Number
+    }
+}
+
+impl FromJs for usize {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        Ok(<u64 as FromJs>::from_js(env, value)?.try_into()?)
+    }
+}
+
+impl IntoJs for usize {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        IntoJs::into_js(self as u64, env)
+    }
+}
+
 impl<T: TsType> TsType for Vec<T> {
     fn ts_type() -> Type {
         Type::Array(Box::new(T::ts_type()))
@@ -229,6 +446,33 @@ impl<T: FromJs> FromJs for Vec<T> {
         }
 
         Ok(result)
+    }
+}
+
+impl<T: TsType> TsType for Option<T> {
+    fn ts_type() -> Type {
+        Type::Optional(Box::new(T::ts_type()))
+    }
+}
+
+impl<T: FromJs> FromJs for Option<T> {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        unsafe {
+            if env.type_of(value)? == napi::Type::Null {
+                return Ok(None);
+            }
+        }
+
+        Ok(Some(T::from_js(env, value)?))
+    }
+}
+
+impl<T: IntoJs> IntoJs for Option<T> {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        match self {
+            Some(value) => value.into_js(env),
+            None => Null.into_js(env),
+        }
     }
 }
 
@@ -281,11 +525,21 @@ pub enum ConversionError {
     ExpectedNull,
     ExpectedUndefined,
     InvalidKind(String),
+    WouldDiscardFraction,
+    IntTooLarge,
+    FloatIsNegative,
+    Int(TryFromIntError),
 }
 
 impl From<napi::Status> for ConversionError {
     fn from(status: napi::Status) -> Self {
         ConversionError::Napi(status)
+    }
+}
+
+impl From<TryFromIntError> for ConversionError {
+    fn from(error: TryFromIntError) -> Self {
+        ConversionError::Int(error)
     }
 }
 
@@ -307,6 +561,12 @@ impl fmt::Display for ConversionError {
                 write!(f, "in enum value: {error}")
             }
             ConversionError::InKind(error) => write!(f, "in enum kind: {error:?}"),
+            ConversionError::WouldDiscardFraction => {
+                write!(f, "conversion to integer would discard fraction")
+            }
+            ConversionError::IntTooLarge => write!(f, "integer too large for js number"),
+            ConversionError::FloatIsNegative => write!(f, "expected non-negative js number"),
+            ConversionError::Int(error) => write!(f, "integer conversion failed: {error}"),
         }
     }
 }
@@ -397,6 +657,7 @@ macro_rules! object {
     ($($name:ident: $value:expr),*$(,)?) => {
         {
             #![allow(non_camel_case_types)]
+            #![allow(non_snake_case)]
 
             struct Object<$($name),*> {
                 $($name: $name,)*
@@ -448,22 +709,31 @@ impl<F> AsyncWork<F> {
     }
 }
 
-impl<F: FnOnce() -> R + Send + 'static, R: TsType + Send + 'static> TsType for AsyncWork<F> {
+impl<F, R, E> TsType for AsyncWork<F>
+where
+    F: FnOnce() -> Result<R, E> + Send + 'static,
+    R: TsType + Send + 'static,
+    E: error::Error + Send + 'static,
+{
     fn ts_type() -> Type {
         Type::Promise(Box::new(R::ts_type()))
     }
 }
 
-impl<F: FnOnce() -> R + Send + 'static, R: IntoJs + Send + 'static> IntoJs for AsyncWork<F> {
+impl<F, R, E> IntoJs for AsyncWork<F>
+where
+    F: FnOnce() -> Result<R, E> + Send + 'static,
+    R: IntoJs + Send + 'static,
+    E: error::Error + Send + 'static,
+{
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         unsafe {
             let (promise, deferred) = env.create_promise()?;
-            let work: AsyncWorkDeferred<F, R> = AsyncWorkDeferred {
+            let work: AsyncWorkDeferred<F, R, E> = AsyncWorkDeferred {
                 deferred,
                 state: AsyncWorkState::Pending(self.fun),
             };
 
-            println!("Creating async work");
             env.create_and_queue_async_work(work)?;
 
             Ok(promise)
@@ -471,30 +741,31 @@ impl<F: FnOnce() -> R + Send + 'static, R: IntoJs + Send + 'static> IntoJs for A
     }
 }
 
-enum AsyncWorkState<F, R> {
+enum AsyncWorkState<F, R, E> {
     Pending(F),
-    Completed(R),
+    Completed(Result<Result<R, E>, Box<dyn Any + Send>>),
     None,
 }
 
-struct AsyncWorkDeferred<F, R> {
-    state: AsyncWorkState<F, R>,
+struct AsyncWorkDeferred<F, R, E> {
+    state: AsyncWorkState<F, R, E>,
     deferred: napi::Deferred,
 }
 
-unsafe impl<F, R> Send for AsyncWorkDeferred<F, R> {}
+unsafe impl<F, R, E> Send for AsyncWorkDeferred<F, R, E> {}
 
-impl<F, R> napi::AsyncWork for AsyncWorkDeferred<F, R>
+impl<F, R, E> napi::AsyncWork for AsyncWorkDeferred<F, R, E>
 where
-    F: FnOnce() -> R + Send + 'static,
+    F: FnOnce() -> Result<R, E> + Send + 'static,
     R: IntoJs + Send + 'static,
+    E: error::Error + Send + 'static,
 {
     fn exec(&mut self) {
         let AsyncWorkState::Pending(fun) = mem::replace(&mut self.state, AsyncWorkState::None)
         else {
             unsafe { hint::unreachable_unchecked() };
         };
-        let result = fun();
+        let result = panic::catch_unwind(AssertUnwindSafe(fun));
         self.state = AsyncWorkState::Completed(result);
     }
 
@@ -503,6 +774,52 @@ where
             let AsyncWorkState::Completed(result) = self.state else {
                 hint::unreachable_unchecked();
             };
+
+            let result = match result {
+                Ok(result) => result,
+                Err(info) => {
+                    let message = if let Some(string) = info.downcast_ref::<String>() {
+                        &string
+                    } else if let Some(string) = info.downcast_ref::<&str>() {
+                        string
+                    } else {
+                        "unknown panic"
+                    };
+
+                    let Ok(error) = env.create_string(message) else {
+                        napi::fatal_error(
+                            "",
+                            &format!(
+                                "failed to create error string when rejecting promise: {message}"
+                            ),
+                        );
+                    };
+                    let reject = env.promise_reject(self.deferred, error);
+                    if let Err(err) = reject {
+                        napi::fatal_error("", &format!("failed to reject promise: {err:?}"));
+                    }
+                    return;
+                }
+            };
+
+            let result = match result {
+                Ok(result) => result,
+                Err(err) => {
+                    let error_str = format!("{err}");
+                    let Ok(error) = env.create_string(&error_str) else {
+                        napi::fatal_error(
+                            "",
+                            &format!("failed to create error string when rejecting promise: {err}"),
+                        );
+                    };
+                    let reject = env.promise_reject(self.deferred, error);
+                    if let Err(err) = reject {
+                        napi::fatal_error("", &format!("failed to reject promise: {err:?}"));
+                    }
+                    return;
+                }
+            };
+
             let result = match result.into_js(env) {
                 Ok(result) => env.promise_resolve(self.deferred, result),
                 Err(err) => {

@@ -33,6 +33,7 @@ pub enum Type {
     },
     Promise(Box<Type>),
     Array(Box<Type>),
+    Optional(Box<Type>),
     Undefined,
     DataView,
 }
@@ -123,6 +124,11 @@ impl Writer {
                 self.write_ts_type(elem)?;
                 write!(self.out, ")[]")
             }
+            Type::Optional(inner) => {
+                write!(self.out, "(")?;
+                self.write_ts_type(inner)?;
+                write!(self.out, ") | null")
+            }
             Type::Promise(inner) => {
                 write!(self.out, "Promise<")?;
                 self.write_ts_type(inner)?;
@@ -144,22 +150,24 @@ impl Writer {
     }
 
     pub fn write_definitions(&mut self) -> io::Result<()> {
-        for (name, ts_type) in mem::take(&mut self.defined_types) {
-            write!(self.out, "export type {name} = ")?;
-            match ts_type {
-                Type::NamedObject { fields, .. } => {
-                    self.write_ts_object(&fields)?;
-                }
-                Type::Enum { kinds, .. } => {
-                    for (name, fields) in kinds {
-                        write!(self.out, "| {{ kind: \"{name}\", fields: ")?;
+        while !self.defined_types.is_empty() {
+            for (name, ts_type) in mem::take(&mut self.defined_types) {
+                write!(self.out, "export type {name} = ")?;
+                match ts_type {
+                    Type::NamedObject { fields, .. } => {
                         self.write_ts_object(&fields)?;
-                        write!(self.out, " }}")?;
                     }
-                }
-                _ => unreachable!(),
-            };
-            writeln!(self.out, ";")?;
+                    Type::Enum { kinds, .. } => {
+                        for (name, fields) in kinds {
+                            write!(self.out, "| {{ kind: \"{name}\", fields: ")?;
+                            self.write_ts_object(&fields)?;
+                            write!(self.out, " }}")?;
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                writeln!(self.out, ";")?;
+            }
         }
 
         Ok(())
