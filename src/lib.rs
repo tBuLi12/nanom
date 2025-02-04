@@ -231,8 +231,8 @@ impl TsType for i64 {
 impl FromJs for i64 {
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
         let float: f64 = FromJs::from_js(env, value)?;
-        if float.fract() != 0.0 {
-            return Err(ConversionError::WouldDiscardFraction);
+        if float as i64 as f64 != float {
+            return Err(ConversionError::IntLoss);
         }
 
         Ok(float as i64)
@@ -242,7 +242,7 @@ impl FromJs for i64 {
 impl IntoJs for i64 {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         if self as f64 as i64 != self {
-            return Err(ConversionError::IntTooLarge);
+            return Err(ConversionError::JsNumberLoss);
         }
 
         IntoJs::into_js(self as f64, env)
@@ -336,7 +336,7 @@ impl FromJs for u64 {
 impl IntoJs for u64 {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         if self as f64 as u64 != self {
-            return Err(ConversionError::IntTooLarge);
+            return Err(ConversionError::JsNumberLoss);
         }
 
         IntoJs::into_js(self as f64, env)
@@ -525,8 +525,8 @@ pub enum ConversionError {
     ExpectedNull,
     ExpectedUndefined,
     InvalidKind(String),
-    WouldDiscardFraction,
-    IntTooLarge,
+    IntLoss,
+    JsNumberLoss,
     FloatIsNegative,
     Int(TryFromIntError),
 }
@@ -561,10 +561,8 @@ impl fmt::Display for ConversionError {
                 write!(f, "in enum value: {error}")
             }
             ConversionError::InKind(error) => write!(f, "in enum kind: {error:?}"),
-            ConversionError::WouldDiscardFraction => {
-                write!(f, "conversion to integer would discard fraction")
-            }
-            ConversionError::IntTooLarge => write!(f, "integer too large for js number"),
+            ConversionError::IntLoss => write!(f, "conversion to integer lost precision"),
+            ConversionError::JsNumberLoss => write!(f, "conversion to js number lost precision"),
             ConversionError::FloatIsNegative => write!(f, "expected non-negative js number"),
             ConversionError::Int(error) => write!(f, "integer conversion failed: {error}"),
         }
