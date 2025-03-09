@@ -571,7 +571,7 @@ impl fmt::Display for ConversionError {
 
 #[derive(Debug)]
 enum Error {
-    Rust(Box<dyn error::Error>),
+    Rust(String),
     InFunctionArgument {
         index: usize,
         error: ConversionError,
@@ -625,13 +625,13 @@ macro_rules! impl_into_js_for_function {
             }
         }
 
-        impl<$($args: FromJs,)* R: IntoJs, E: error::Error + 'static, F: Fn(($($args,)*)) -> Result<R, E> + 'static> IntoJs
+        impl<$($args: FromJs,)* R: IntoJs, E: fmt::Display + 'static, F: Fn(($($args,)*)) -> Result<R, E> + 'static> IntoJs
             for Function<F, ($($args,)*)>
         {
             fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
                 #[allow(non_snake_case, unused_variables)]
                 wrap_function(env, move |env, [$($args),*]| {
-                    (self.function)(($(FromJs::from_js(env, $args).map_err(|error| Error::InFunctionArgument { error, index: $idx })?,)*),).map_err(|err| Error::Rust(Box::new(err)))
+                    (self.function)(($(FromJs::from_js(env, $args).map_err(|error| Error::InFunctionArgument { error, index: $idx })?,)*),).map_err(|err| Error::Rust(format!("{err}")))
                 })
             }
         }
@@ -854,5 +854,70 @@ where
                 napi::fatal_error("", &format!("failed to resolve promise: {err:?}"));
             }
         }
+    }
+}
+
+pub struct ThreadSafeFunction<A> {
+    fun: napi::ThreadSafeFunction<A>,
+}
+
+pub trait Args {
+    fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError>;
+    fn args_type() -> Vec<Type>;
+}
+
+impl<A: Args> napi::Args for A {
+    type Error = ConversionError;
+
+    fn create_args(self, env: napi::Env) -> std::result::Result<Vec<napi::Value>, Self::Error> {
+        Args::create_args(self, env)
+    }
+}
+
+macro_rules! impl_args {
+    ($($args:ident $idx:tt),*) => {
+        impl<$($args: IntoJs),*> Args for ($($args,)*) {
+            fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError> {
+                Ok(vec![$($args::into_js(self.$idx, env)?),*])
+            }
+
+            fn args_type() -> Vec<Type> {
+                vec![$($args::ts_type()),*]
+            }
+        }
+    };
+}
+
+impl_args!();
+impl_args!(A1 0);
+impl_args!(A1 0, A2 1);
+impl_args!(A1 0, A2 1, A3 2);
+impl_args!(A1 0, A2 1, A3 2, A4 3);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4, A6 5);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4, A6 5, A7 6);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4, A6 5, A7 6, A8 7);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4, A6 5, A7 6, A8 7, A9 8);
+impl_args!(A1 0, A2 1, A3 2, A4 3, A5 4, A6 5, A7 6, A8 7, A9 8, A10 9);
+
+impl<A: Args> TsType for ThreadSafeFunction<A> {
+    fn ts_type() -> Type {
+        Type::Function {
+            args: A::args_type(),
+            return_type: Box::new(Type::Undefined),
+        }
+    }
+}
+
+impl<A: Args> FromJs for ThreadSafeFunction<A> {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        let fun = unsafe { env.create_thread_safe_function(value)? };
+        Ok(ThreadSafeFunction { fun })
+    }
+}
+
+impl<A: Args> ThreadSafeFunction<A> {
+    pub fn call(&self, args: A) -> Result<(), napi::Status> {
+        unsafe { self.fun.call(args) }
     }
 }

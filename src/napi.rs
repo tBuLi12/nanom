@@ -1,8 +1,9 @@
 use std::{
     any, error,
     ffi::c_void,
-    fmt::Debug,
+    fmt::{self, Debug},
     hint,
+    marker::PhantomData,
     panic::{self, AssertUnwindSafe},
     ptr, result,
 };
@@ -424,7 +425,7 @@ impl Env {
 
     pub unsafe fn create_function<
         const N: usize,
-        E: error::Error,
+        E: fmt::Display,
         F: Fn(Env, [Value; N]) -> result::Result<Value, E> + 'static,
     >(
         &self,
@@ -513,6 +514,76 @@ impl Env {
     pub unsafe fn promise_reject(&self, deferred: Deferred, value: Value) -> Result<()> {
         as_result(napi_sys::napi_reject_deferred(self.inner, deferred, value))
     }
+
+    pub unsafe fn call_function(&self, fun: Value, args: &[Value]) -> Result<Value> {
+        let mut result = ptr::null_mut();
+
+        as_result(napi_sys::napi_call_function(
+            self.inner,
+            ptr::null_mut(),
+            fun,
+            args.len(),
+            args.as_ptr(),
+            &mut result,
+        ))?;
+
+        Ok(result)
+    }
+
+    pub unsafe fn create_thread_safe_function<A: Args>(
+        &self,
+        fun: Value,
+    ) -> Result<ThreadSafeFunction<A>> {
+        let mut result = ptr::null_mut();
+
+        as_result(napi_sys::napi_create_threadsafe_function(
+            self.inner,
+            fun,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0,
+            1,
+            ptr::null_mut(),
+            None,
+            ptr::null_mut(),
+            Some(call_thread_safe_function::<A>),
+            &mut result,
+        ))?;
+
+        Ok(ThreadSafeFunction {
+            inner: result,
+            _marker: PhantomData,
+        })
+    }
+}
+
+pub trait Args {
+    type Error: fmt::Display;
+
+    fn create_args(self, env: Env) -> std::result::Result<Vec<Value>, Self::Error>;
+}
+
+pub struct ThreadSafeFunction<A> {
+    _marker: PhantomData<fn(A)>,
+    inner: napi_sys::napi_threadsafe_function,
+}
+
+impl<A> ThreadSafeFunction<A> {
+    pub unsafe fn call(&self, create_args: A) -> Result<()> {
+        let ptr = Box::into_raw(Box::new(create_args));
+
+        let result = as_result(napi_sys::napi_call_threadsafe_function(
+            self.inner,
+            ptr as *mut c_void,
+            napi_sys::ThreadsafeFunctionCallMode::blocking,
+        ));
+
+        if result.is_err() {
+            drop(Box::from_raw(ptr));
+        }
+
+        result
+    }
 }
 
 unsafe extern "C" fn drop_data<T>(_: napi_env, data: *mut c_void, _: *mut c_void) {
@@ -521,7 +592,7 @@ unsafe extern "C" fn drop_data<T>(_: napi_env, data: *mut c_void, _: *mut c_void
 
 unsafe extern "C" fn call_function<
     const N: usize,
-    E: error::Error,
+    E: fmt::Display,
     F: Fn(Env, [Value; N]) -> result::Result<Value, E> + 'static,
 >(
     env: napi_env,
@@ -604,6 +675,25 @@ unsafe extern "C" fn complete_async_work<W: AsyncWork>(
     }
 
     napi_sys::napi_delete_async_work(env.inner, work);
+}
+
+unsafe extern "C" fn call_thread_safe_function<A: Args>(
+    env: napi_env,
+    callback: Value,
+    _: *mut c_void,
+    data: *mut c_void,
+) {
+    let env = Env { inner: env };
+    let data = Box::from_raw(data as *mut A);
+
+    match data.create_args(env) {
+        Err(error) => {
+            env.must_throw(&format!("{}", error));
+        }
+        Ok(args) => {
+            let _ = env.call_function(callback, &args);
+        }
+    }
 }
 
 pub struct ArrayBuffer {
