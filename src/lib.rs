@@ -711,7 +711,7 @@ impl<F, R, E> TsType for AsyncWork<F>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
     R: TsType + Send + 'static,
-    E: error::Error + Send + 'static,
+    E: fmt::Display + Send + 'static,
 {
     fn ts_type() -> Type {
         Type::Promise(Box::new(R::ts_type()))
@@ -722,7 +722,7 @@ impl<F, R, E> IntoJs for AsyncWork<F>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
     R: IntoJs + Send + 'static,
-    E: error::Error + Send + 'static,
+    E: fmt::Display + Send + 'static,
 {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         unsafe {
@@ -756,7 +756,7 @@ impl<F, R, E> napi::AsyncWork for AsyncWorkDeferred<F, R, E>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
     R: IntoJs + Send + 'static,
-    E: error::Error + Send + 'static,
+    E: fmt::Display + Send + 'static,
 {
     fn exec(&mut self) {
         let AsyncWorkState::Pending(fun) = mem::replace(&mut self.state, AsyncWorkState::None)
@@ -861,6 +861,8 @@ pub struct ThreadSafeFunction<A> {
     fun: napi::ThreadSafeFunction<A>,
 }
 
+unsafe impl<A: Send> Send for ThreadSafeFunction<A> {}
+
 pub trait Args {
     fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError>;
     fn args_type() -> Vec<Type>;
@@ -877,7 +879,7 @@ impl<A: Args> napi::Args for A {
 macro_rules! impl_args {
     ($($args:ident $idx:tt),*) => {
         impl<$($args: IntoJs),*> Args for ($($args,)*) {
-            fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError> {
+            fn create_args(self, #[allow(unused_variables)] env: napi::Env) -> Result<Vec<napi::Value>, ConversionError> {
                 Ok(vec![$($args::into_js(self.$idx, env)?),*])
             }
 

@@ -1,5 +1,5 @@
 use std::{
-    any, error,
+    any,
     ffi::c_void,
     fmt::{self, Debug},
     hint,
@@ -520,7 +520,7 @@ impl Env {
 
         as_result(napi_sys::napi_call_function(
             self.inner,
-            ptr::null_mut(),
+            self.get_undefined()?,
             fun,
             args.len(),
             args.as_ptr(),
@@ -540,7 +540,7 @@ impl Env {
             self.inner,
             fun,
             ptr::null_mut(),
-            ptr::null_mut(),
+            self.create_string("nanom thread safe function")?,
             0,
             1,
             ptr::null_mut(),
@@ -583,6 +583,28 @@ impl<A> ThreadSafeFunction<A> {
         }
 
         result
+    }
+}
+
+impl<A> Drop for ThreadSafeFunction<A> {
+    fn drop(&mut self) {
+        unsafe {
+            napi_sys::napi_release_threadsafe_function(
+                self.inner,
+                napi_sys::ThreadsafeFunctionReleaseMode::release,
+            )
+        };
+    }
+}
+
+impl<A> Clone for ThreadSafeFunction<A> {
+    fn clone(&self) -> Self {
+        as_result(unsafe { napi_sys::napi_acquire_threadsafe_function(self.inner) }).unwrap();
+
+        Self {
+            inner: self.inner,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -691,7 +713,9 @@ unsafe extern "C" fn call_thread_safe_function<A: Args>(
             env.must_throw(&format!("{}", error));
         }
         Ok(args) => {
-            let _ = env.call_function(callback, &args);
+            if let Err(error) = env.call_function(callback, &args) {
+                env.must_throw(&format!("thread safe function call failed: {error:?}"));
+            }
         }
     }
 }
