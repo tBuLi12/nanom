@@ -1,6 +1,6 @@
 [package]
 name = "nanom"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Lightweight helper library for authoring native node modules"
 license = "MIT"
@@ -10,4 +10,4 @@ version = "2.4.0"
 features = ["napi9", "dyn-symbols"]
 
 [dependencies]
-nanom-derive = "0.1.1"
+nanom-derive = "0.1.2"

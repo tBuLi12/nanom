@@ -710,8 +710,8 @@ impl<F> AsyncWork<F> {
 impl<F, R, E> TsType for AsyncWork<F>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
-    R: TsType + Send + 'static,
-    E: fmt::Display + Send + 'static,
+    R: TsType + 'static,
+    E: fmt::Display + 'static,
 {
     fn ts_type() -> Type {
         Type::Promise(Box::new(R::ts_type()))
@@ -721,8 +721,8 @@ where
 impl<F, R, E> IntoJs for AsyncWork<F>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
-    R: IntoJs + Send + 'static,
-    E: fmt::Display + Send + 'static,
+    R: IntoJs + 'static,
+    E: fmt::Display + 'static,
 {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         unsafe {
@@ -755,8 +755,8 @@ unsafe impl<F, R, E> Send for AsyncWorkDeferred<F, R, E> {}
 impl<F, R, E> napi::AsyncWork for AsyncWorkDeferred<F, R, E>
 where
     F: FnOnce() -> Result<R, E> + Send + 'static,
-    R: IntoJs + Send + 'static,
-    E: fmt::Display + Send + 'static,
+    R: IntoJs + 'static,
+    E: fmt::Display + 'static,
 {
     fn exec(&mut self) {
         let AsyncWorkState::Pending(fun) = mem::replace(&mut self.state, AsyncWorkState::None)
