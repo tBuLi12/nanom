@@ -34,6 +34,7 @@ pub enum Type {
     Promise(Box<Type>),
     Array(Box<Type>),
     Optional(Box<Type>),
+    Tuple(Vec<Type>),
     Undefined,
     DataView,
 }
@@ -128,6 +129,16 @@ impl Writer {
                 write!(self.out, "(")?;
                 self.write_ts_type(inner)?;
                 write!(self.out, ") | null")
+            }
+            Type::Tuple(inner) => {
+                write!(self.out, "[")?;
+                for (i, ty) in inner.iter().enumerate() {
+                    self.write_ts_type(ty)?;
+                    if i != inner.len() - 1 {
+                        write!(self.out, ", ")?;
+                    }
+                }
+                write!(self.out, "]")
             }
             Type::Promise(inner) => {
                 write!(self.out, "Promise<")?;

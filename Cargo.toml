@@ -1,6 +1,6 @@
 [package]
 name = "nanom"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Lightweight helper library for authoring native node modules"
 license = "MIT"

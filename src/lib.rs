@@ -1,7 +1,8 @@
 use std::{
     any::Any,
     convert::Infallible,
-    error, fmt, hint, mem,
+    error, fmt, hint,
+    mem::{self, MaybeUninit},
     num::TryFromIntError,
     panic::{self, AssertUnwindSafe},
 };
@@ -476,6 +477,65 @@ impl<T: IntoJs> IntoJs for Option<T> {
     }
 }
 
+impl<T: TsType, const N: usize> TsType for [T; N] {
+    fn ts_type() -> Type {
+        Type::Tuple(vec![T::ts_type(); N])
+    }
+}
+
+impl<T: FromJs, const N: usize> FromJs for [T; N] {
+    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
+        let len = unsafe { env.get_array_len(value)? };
+
+        if len != N as u32 {
+            return Err(ConversionError::InvalidTupleLength {
+                expected: N,
+                actual: len as usize,
+            });
+        }
+
+        let mut this = [const { MaybeUninit::uninit() }; N];
+
+        let get_element = |i: u32| -> Result<_, ConversionError> {
+            Ok(T::from_js(env, unsafe { env.get_element(value, i)? })?)
+        };
+
+        for i in 0..len {
+            match get_element(i) {
+                Ok(value) => unsafe {
+                    this[i as usize].write(value);
+                },
+                Err(err) => {
+                    for i in 0..i {
+                        unsafe {
+                            this[i as usize].assume_init_drop();
+                        }
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        let this: [T; N] = unsafe { mem::transmute_copy(&this) };
+
+        Ok(this)
+    }
+}
+
+impl<T: IntoJs, const N: usize> IntoJs for [T; N] {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        let array = unsafe { env.create_array_with_length(N) }?;
+
+        for (i, item) in self.into_iter().enumerate() {
+            unsafe {
+                env.set_element(array, i as u32, item.into_js(env)?)?;
+            }
+        }
+
+        Ok(array)
+    }
+}
+
 impl TsType for *mut [u8] {
     fn ts_type() -> Type {
         Type::DataView
@@ -522,6 +582,10 @@ pub enum ConversionError {
     },
     InKind(napi::Status),
     InEnumValue(Box<ConversionError>),
+    InvalidTupleLength {
+        expected: usize,
+        actual: usize,
+    },
     ExpectedNull,
     ExpectedUndefined,
     InvalidKind(String),
@@ -561,6 +625,12 @@ impl fmt::Display for ConversionError {
                 write!(f, "in enum value: {error}")
             }
             ConversionError::InKind(error) => write!(f, "in enum kind: {error:?}"),
+            ConversionError::InvalidTupleLength { expected, actual } => {
+                write!(
+                    f,
+                    "expected tuple of length {expected}, but length was {actual}"
+                )
+            }
             ConversionError::IntLoss => write!(f, "conversion to integer lost precision"),
             ConversionError::JsNumberLoss => write!(f, "conversion to js number lost precision"),
             ConversionError::FloatIsNegative => write!(f, "expected non-negative js number"),
