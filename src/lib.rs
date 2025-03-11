@@ -863,6 +863,14 @@ pub struct ThreadSafeFunction<A> {
 
 unsafe impl<A: Send> Send for ThreadSafeFunction<A> {}
 
+impl<A> Clone for ThreadSafeFunction<A> {
+    fn clone(&self) -> Self {
+        Self {
+            fun: self.fun.clone(),
+        }
+    }
+}
+
 pub trait Args {
     fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError>;
     fn args_type() -> Vec<Type>;
