@@ -9,6 +9,12 @@ use std::{
 
 use crate::TsType;
 
+#[derive(Clone, Copy)]
+pub struct TypeRef {
+    pub id: TypeId,
+    pub get_type: fn() -> Type,
+}
+
 #[derive(Clone)]
 pub enum Type {
     Null,
@@ -19,24 +25,32 @@ pub enum Type {
     NamedObject {
         id: TypeId,
         name: String,
-        fields: HashMap<String, Type>,
+        fields: HashMap<String, TypeRef>,
     },
-    Object(HashMap<String, Type>),
+    Object(HashMap<String, TypeRef>),
     Enum {
         id: TypeId,
         name: String,
-        kinds: HashMap<String, HashMap<String, Type>>,
+        kinds: HashMap<String, HashMap<String, TypeRef>>,
     },
     Function {
-        args: Vec<Type>,
-        return_type: Box<Type>,
+        args: Vec<TypeRef>,
+        return_type: Box<TypeRef>,
     },
-    Promise(Box<Type>),
-    Array(Box<Type>),
-    Optional(Box<Type>),
-    Tuple(Vec<Type>),
+    Promise(Box<TypeRef>),
+    Array(Box<TypeRef>),
+    Optional(Box<TypeRef>),
+    Tuple(Vec<TypeRef>),
     Undefined,
     DataView,
+}
+
+pub struct Undefined;
+
+impl TsType for Undefined {
+    fn ts_type() -> Type {
+        Type::Undefined
+    }
 }
 
 pub fn generate_tds_file<Module: TsType>(
@@ -57,7 +71,7 @@ pub fn generate_tds_file<Module: TsType>(
 
     for (name, item) in fields {
         write!(writer.out, "export const {name}: ")?;
-        writer.write_ts_type(&item)?;
+        writer.write_ts_type(&(item.get_type)())?;
         writeln!(writer.out, ";")?;
     }
 
@@ -93,18 +107,18 @@ impl Writer {
             Type::Number => write!(self.out, "number"),
             Type::BigInt => write!(self.out, "bigint"),
             Type::String => write!(self.out, "string"),
-            Type::Object(fields) => self.write_ts_object(fields),
+            Type::Object(fields) => self.write_ts_object(&fields),
             Type::NamedObject { id, name, .. } => {
                 write!(self.out, "{name}")?;
 
-                self.define_type(name, *id, ts_type);
+                self.define_type(&name, *id, ts_type);
 
                 Ok(())
             }
             Type::Enum { id, name, .. } => {
                 write!(self.out, "{name}")?;
 
-                self.define_type(name, *id, ts_type);
+                self.define_type(&name, *id, ts_type);
 
                 Ok(())
             }
@@ -112,28 +126,28 @@ impl Writer {
                 write!(self.out, "(")?;
                 for (i, arg) in args.iter().enumerate() {
                     write!(self.out, "arg{i}: ")?;
-                    self.write_ts_type(arg)?;
+                    self.write_ts_type(&(arg.get_type)())?;
                     if i != args.len() - 1 {
                         write!(self.out, ", ")?;
                     }
                 }
                 write!(self.out, ") => ")?;
-                self.write_ts_type(return_type)
+                self.write_ts_type(&(return_type.get_type)())
             }
             Type::Array(elem) => {
                 write!(self.out, "(")?;
-                self.write_ts_type(elem)?;
+                self.write_ts_type(&(elem.get_type)())?;
                 write!(self.out, ")[]")
             }
             Type::Optional(inner) => {
                 write!(self.out, "(")?;
-                self.write_ts_type(inner)?;
+                self.write_ts_type(&(inner.get_type)())?;
                 write!(self.out, ") | null")
             }
             Type::Tuple(inner) => {
                 write!(self.out, "[")?;
                 for (i, ty) in inner.iter().enumerate() {
-                    self.write_ts_type(ty)?;
+                    self.write_ts_type(&(ty.get_type)())?;
                     if i != inner.len() - 1 {
                         write!(self.out, ", ")?;
                     }
@@ -142,7 +156,7 @@ impl Writer {
             }
             Type::Promise(inner) => {
                 write!(self.out, "Promise<")?;
-                self.write_ts_type(inner)?;
+                self.write_ts_type(&(inner.get_type)())?;
                 write!(self.out, ">")
             }
             Type::Undefined => write!(self.out, "undefined"),
@@ -150,11 +164,11 @@ impl Writer {
         }
     }
 
-    pub fn write_ts_object(&mut self, fields: &HashMap<String, Type>) -> io::Result<()> {
+    pub fn write_ts_object(&mut self, fields: &HashMap<String, TypeRef>) -> io::Result<()> {
         write!(self.out, "{{")?;
         for (name, field) in fields {
             write!(self.out, "{name}: ")?;
-            self.write_ts_type(field)?;
+            self.write_ts_type(&(field.get_type)())?;
             write!(self.out, ", ")?;
         }
         write!(self.out, "}}")

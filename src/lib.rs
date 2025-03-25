@@ -1,5 +1,5 @@
 use std::{
-    any::Any,
+    any::{Any, TypeId},
     convert::Infallible,
     error, fmt, hint,
     mem::{self, MaybeUninit},
@@ -11,7 +11,7 @@ pub mod napi;
 pub mod typing;
 
 pub use nanom_derive::JsObject;
-use typing::Type;
+use typing::{Type, TypeRef, Undefined};
 
 #[macro_export]
 macro_rules! register_module {
@@ -53,8 +53,15 @@ pub unsafe fn register_object_as_module(
     exports
 }
 
-pub trait TsType {
+pub trait TsType: 'static {
     fn ts_type() -> Type;
+
+    fn ts_type_ref() -> TypeRef {
+        TypeRef {
+            id: TypeId::of::<Self>(),
+            get_type: || Self::ts_type(),
+        }
+    }
 }
 
 pub trait FromJs: TsType + Sized {
@@ -65,7 +72,7 @@ pub trait IntoJs: TsType {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError>;
 }
 
-pub trait JsObject: Sized {
+pub trait JsObject: Sized + 'static {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError>;
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError>;
     fn ts_type() -> Type;
@@ -157,18 +164,6 @@ impl TsType for bool {
     }
 }
 
-impl<'a> TsType for &'a str {
-    fn ts_type() -> Type {
-        Type::String
-    }
-}
-
-impl<'a> IntoJs for &'a str {
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        unsafe { env.create_string(self) }.map_err(ConversionError::Napi)
-    }
-}
-
 impl TsType for String {
     fn ts_type() -> Type {
         Type::String
@@ -183,7 +178,7 @@ impl FromJs for String {
 
 impl IntoJs for String {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        IntoJs::into_js(&self[..], env)
+        unsafe { env.create_string(&self) }.map_err(ConversionError::Napi)
     }
 }
 
@@ -418,7 +413,7 @@ impl IntoJs for usize {
 
 impl<T: TsType> TsType for Vec<T> {
     fn ts_type() -> Type {
-        Type::Array(Box::new(T::ts_type()))
+        Type::Array(Box::new(T::ts_type_ref()))
     }
 }
 
@@ -452,7 +447,7 @@ impl<T: FromJs> FromJs for Vec<T> {
 
 impl<T: TsType> TsType for Option<T> {
     fn ts_type() -> Type {
-        Type::Optional(Box::new(T::ts_type()))
+        Type::Optional(Box::new(T::ts_type_ref()))
     }
 }
 
@@ -479,7 +474,7 @@ impl<T: IntoJs> IntoJs for Option<T> {
 
 impl<T: TsType, const N: usize> TsType for [T; N] {
     fn ts_type() -> Type {
-        Type::Tuple(vec![T::ts_type(); N])
+        Type::Tuple(vec![T::ts_type_ref(); N])
     }
 }
 
@@ -502,9 +497,9 @@ impl<T: FromJs, const N: usize> FromJs for [T; N] {
 
         for i in 0..len {
             match get_element(i) {
-                Ok(value) => unsafe {
+                Ok(value) => {
                     this[i as usize].write(value);
-                },
+                }
                 Err(err) => {
                     for i in 0..i {
                         unsafe {
@@ -684,13 +679,13 @@ fn wrap_function<
 
 macro_rules! impl_into_js_for_function {
     ($($args:ident $idx:literal),*) => {
-        impl<$($args: TsType,)* R: TsType, E, F: Fn(($($args,)*)) -> Result<R, E>> TsType
+        impl<$($args: TsType,)* R: TsType, E, F: Fn(($($args,)*)) -> Result<R, E> + 'static> TsType
             for Function<F, ($($args,)*)>
         {
             fn ts_type() -> Type {
                 Type::Function {
-                    args: vec![$($args::ts_type()),*],
-                    return_type: Box::new(R::ts_type()),
+                    args: vec![$($args::ts_type_ref()),*],
+                    return_type: Box::new(R::ts_type_ref()),
                 }
             }
         }
@@ -753,7 +748,7 @@ macro_rules! object {
                     let mut fields = ::std::collections::HashMap::new();
 
                     $(
-                        fields.insert(stringify!($name).to_string(), <$name as ::nanom::TsType>::ts_type());
+                        fields.insert(stringify!($name).to_string(), <$name as ::nanom::TsType>::ts_type_ref());
                     )*
 
                     ::nanom::typing::Type::Object(fields)
@@ -784,7 +779,7 @@ where
     E: fmt::Display + 'static,
 {
     fn ts_type() -> Type {
-        Type::Promise(Box::new(R::ts_type()))
+        Type::Promise(Box::new(R::ts_type_ref()))
     }
 }
 
@@ -932,6 +927,7 @@ pub struct ThreadSafeFunction<A> {
 }
 
 unsafe impl<A: Send> Send for ThreadSafeFunction<A> {}
+unsafe impl<A: Send> Sync for ThreadSafeFunction<A> {}
 
 impl<A> Clone for ThreadSafeFunction<A> {
     fn clone(&self) -> Self {
@@ -941,9 +937,9 @@ impl<A> Clone for ThreadSafeFunction<A> {
     }
 }
 
-pub trait Args {
+pub trait Args: 'static {
     fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError>;
-    fn args_type() -> Vec<Type>;
+    fn args_type() -> Vec<TypeRef>;
 }
 
 impl<A: Args> napi::Args for A {
@@ -961,8 +957,8 @@ macro_rules! impl_args {
                 Ok(vec![$($args::into_js(self.$idx, env)?),*])
             }
 
-            fn args_type() -> Vec<Type> {
-                vec![$($args::ts_type()),*]
+            fn args_type() -> Vec<TypeRef> {
+                vec![$($args::ts_type_ref()),*]
             }
         }
     };
@@ -984,7 +980,7 @@ impl<A: Args> TsType for ThreadSafeFunction<A> {
     fn ts_type() -> Type {
         Type::Function {
             args: A::args_type(),
-            return_type: Box::new(Type::Undefined),
+            return_type: Box::new(Undefined::ts_type_ref()),
         }
     }
 }
