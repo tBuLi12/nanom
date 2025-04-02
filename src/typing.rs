@@ -1,5 +1,4 @@
 use std::{
-    any::TypeId,
     collections::{HashMap, HashSet},
     fs::File,
     io::{self, BufWriter, Write},
@@ -9,9 +8,8 @@ use std::{
 
 use crate::TsType;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TypeRef {
-    pub id: TypeId,
     pub get_type: fn() -> Type,
 }
 
@@ -23,13 +21,13 @@ pub enum Type {
     BigInt,
     String,
     NamedObject {
-        id: TypeId,
+        id: TypeRef,
         name: String,
         fields: HashMap<String, TypeRef>,
     },
     Object(HashMap<String, TypeRef>),
     Enum {
-        id: TypeId,
+        id: TypeRef,
         name: String,
         kinds: HashMap<String, HashMap<String, TypeRef>>,
     },
@@ -82,12 +80,12 @@ pub fn generate_tds_file<Module: TsType>(
 
 struct Writer {
     out: BufWriter<File>,
-    defined_types_ids: HashSet<TypeId>,
+    defined_types_ids: HashSet<TypeRef>,
     defined_types: HashMap<String, Type>,
 }
 
 impl Writer {
-    pub fn define_type(&mut self, name: &str, id: TypeId, ts_type: &Type) {
+    pub fn define_type(&mut self, name: &str, id: TypeRef, ts_type: &Type) {
         if self.defined_types_ids.contains(&id) {
             return;
         }

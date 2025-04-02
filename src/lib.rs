@@ -1,5 +1,5 @@
 use std::{
-    any::{Any, TypeId},
+    any::Any,
     convert::Infallible,
     error, fmt, hint,
     mem::{self, MaybeUninit},
@@ -10,7 +10,7 @@ use std::{
 pub mod napi;
 pub mod typing;
 
-pub use nanom_derive::JsObject;
+pub use nanom_derive::{FromJs, IntoJs, JsObject, TsType};
 use typing::{Type, TypeRef, Undefined};
 
 #[macro_export]
@@ -53,13 +53,12 @@ pub unsafe fn register_object_as_module(
     exports
 }
 
-pub trait TsType: 'static {
+pub trait TsType {
     fn ts_type() -> Type;
 
     fn ts_type_ref() -> TypeRef {
         TypeRef {
-            id: TypeId::of::<Self>(),
-            get_type: || Self::ts_type(),
+            get_type: Self::ts_type,
         }
     }
 }
@@ -73,7 +72,7 @@ pub trait IntoJs: TsType {
 }
 
 pub trait JsObject: Sized + 'static {
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError>;
+    fn into_js(&self, env: napi::Env) -> Result<napi::Value, ConversionError>;
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError>;
     fn ts_type() -> Type;
 }
@@ -86,7 +85,7 @@ impl<T: JsObject> TsType for T {
 
 impl<T: JsObject> IntoJs for T {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        JsObject::into_js(self, env)
+        JsObject::into_js(&self, env)
     }
 }
 
@@ -120,6 +119,7 @@ impl IntoJs for () {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Null;
 
 impl TsType for Null {
@@ -176,9 +176,33 @@ impl FromJs for String {
     }
 }
 
-impl IntoJs for String {
+impl TsType for &str {
+    fn ts_type() -> Type {
+        Type::String
+    }
+}
+
+impl IntoJs for &str {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         unsafe { env.create_string(&self) }.map_err(ConversionError::Napi)
+    }
+}
+
+impl TsType for &String {
+    fn ts_type() -> Type {
+        Type::String
+    }
+}
+
+impl IntoJs for &String {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        <&str as IntoJs>::into_js(&self, env)
+    }
+}
+
+impl IntoJs for String {
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        <&str as IntoJs>::into_js(&self, env)
     }
 }
 
@@ -431,6 +455,50 @@ impl<T: IntoJs> IntoJs for Vec<T> {
     }
 }
 
+impl<T> TsType for &[T]
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn ts_type() -> Type {
+        Type::Array(Box::new(<&T>::ts_type_ref()))
+    }
+}
+
+impl<T> IntoJs for &[T]
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        let array = unsafe { env.create_array_with_length(self.len()) }?;
+
+        for (i, item) in self.into_iter().enumerate() {
+            unsafe {
+                env.set_element(array, i as u32, item.into_js(env)?)?;
+            }
+        }
+
+        Ok(array)
+    }
+}
+
+impl<T> TsType for &Vec<T>
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn ts_type() -> Type {
+        Type::Array(Box::new(<&T>::ts_type_ref()))
+    }
+}
+
+impl<T> IntoJs for &Vec<T>
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        <&[T] as IntoJs>::into_js(self, env)
+    }
+}
+
 impl<T: FromJs> FromJs for Vec<T> {
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
         let len = unsafe { env.get_array_len(value)? };
@@ -460,6 +528,27 @@ impl<T: FromJs> FromJs for Option<T> {
         }
 
         Ok(Some(T::from_js(env, value)?))
+    }
+}
+
+impl<T> TsType for &Option<T>
+where
+    for<'a> &'a T: TsType,
+{
+    fn ts_type() -> Type {
+        Type::Optional(Box::new(<&T>::ts_type_ref()))
+    }
+}
+
+impl<T> IntoJs for &Option<T>
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        match self {
+            Some(value) => value.into_js(env),
+            None => Null.into_js(env),
+        }
     }
 }
 
@@ -517,6 +606,24 @@ impl<T: FromJs, const N: usize> FromJs for [T; N] {
     }
 }
 
+impl<T, const N: usize> TsType for &[T; N]
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn ts_type() -> Type {
+        Type::Tuple(vec![<&T>::ts_type_ref(); N])
+    }
+}
+
+impl<T, const N: usize> IntoJs for &[T; N]
+where
+    for<'a> &'a T: IntoJs,
+{
+    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+        <&[T] as IntoJs>::into_js(self, env)
+    }
+}
+
 impl<T: IntoJs, const N: usize> IntoJs for [T; N] {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         let array = unsafe { env.create_array_with_length(N) }?;
@@ -541,6 +648,31 @@ impl FromJs for *mut [u8] {
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
         unsafe { env.get_data_view(value) }.map_err(ConversionError::Napi)
     }
+}
+
+macro_rules! impl_into_js_ref {
+    ($($type_name:ty),*$(,)?) => {
+        $(
+            impl TsType for &$type_name {
+                fn ts_type() -> Type {
+                    <$type_name as TsType>::ts_type()
+                }
+            }
+
+            impl IntoJs for &$type_name {
+                fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
+                    IntoJs::into_js(*self, env)
+                }
+            }
+        )*
+    };
+}
+
+impl_into_js_ref! {
+    (), Null, bool,
+    u8, u16, u32, u64, usize,
+    i8, i16, i32, i64, isize,
+    f32, f64,
 }
 
 pub struct Function<F, A> {
@@ -937,7 +1069,7 @@ impl<A> Clone for ThreadSafeFunction<A> {
     }
 }
 
-pub trait Args: 'static {
+pub trait Args {
     fn create_args(self, env: napi::Env) -> Result<Vec<napi::Value>, ConversionError>;
     fn args_type() -> Vec<TypeRef>;
 }
