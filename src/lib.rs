@@ -71,30 +71,6 @@ pub trait IntoJs: TsType {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError>;
 }
 
-pub trait JsObject: Sized + 'static {
-    fn into_js(&self, env: napi::Env) -> Result<napi::Value, ConversionError>;
-    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError>;
-    fn ts_type() -> Type;
-}
-
-impl<T: JsObject> TsType for T {
-    fn ts_type() -> Type {
-        <T as JsObject>::ts_type()
-    }
-}
-
-impl<T: JsObject> IntoJs for T {
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        JsObject::into_js(&self, env)
-    }
-}
-
-impl<T: JsObject> FromJs for T {
-    fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
-        JsObject::from_js(env, value)
-    }
-}
-
 impl TsType for () {
     fn ts_type() -> Type {
         Type::Undefined
@@ -673,6 +649,101 @@ impl_into_js_ref! {
     u8, u16, u32, u64, usize,
     i8, i16, i32, i64, isize,
     f32, f64,
+}
+
+pub struct ObjectBuilder {
+    env: napi::Env,
+    object: napi::Value,
+}
+
+impl ObjectBuilder {
+    pub fn field(self, name: &str, value: impl IntoJs) -> Result<Self, ConversionError> {
+        let value = value.into_js(self.env)?;
+
+        unsafe {
+            self.env
+                .set_property(self.object, self.env.create_string(name)?, value)?;
+        }
+
+        Ok(self)
+    }
+
+    pub fn build(self) -> napi::Value {
+        self.object
+    }
+}
+
+pub unsafe fn object_builder(env: napi::Env) -> Result<ObjectBuilder, ConversionError> {
+    Ok(ObjectBuilder {
+        env,
+        object: env.create_object()?,
+    })
+}
+
+pub unsafe fn create_enum(
+    env: napi::Env,
+    variant_name: &str,
+    fields: napi::Value,
+) -> Result<napi::Value, ConversionError> {
+    let object = env.create_object()?;
+
+    env.set_property(
+        object,
+        env.create_string("kind")?,
+        env.create_string(variant_name)?,
+    )?;
+    env.set_property(object, env.create_string("fields")?, fields)?;
+
+    Ok(object)
+}
+
+pub struct ObjectAccessor {
+    env: napi::Env,
+    object: napi::Value,
+}
+
+impl ObjectAccessor {
+    pub fn get<T: FromJs>(&self, name: &str) -> Result<T, ConversionError> {
+        let value = unsafe {
+            self.env
+                .get_property(self.object, self.env.create_string(name)?)?
+        };
+
+        T::from_js(self.env, value)
+    }
+}
+
+pub unsafe fn object_accessor(env: napi::Env, object: napi::Value) -> ObjectAccessor {
+    ObjectAccessor { env, object }
+}
+
+pub struct EnumAccessor {
+    env: napi::Env,
+    object: napi::Value,
+}
+
+impl EnumAccessor {
+    pub fn variant(&self) -> Result<String, ConversionError> {
+        let value = unsafe {
+            self.env
+                .get_property(self.object, self.env.create_string("kind")?)?
+        };
+
+        Ok(unsafe { self.env.get_value_string(value)? })
+    }
+
+    pub fn fields(&self) -> Result<ObjectAccessor, ConversionError> {
+        let value = unsafe {
+            self.env
+                .get_property(self.object, self.env.create_string("fields")?)?
+        };
+
+        Ok(unsafe { object_accessor(self.env, value) })
+    }
+}
+
+pub unsafe fn enum_accessor(env: napi::Env, object: napi::Value) -> EnumAccessor {
+    EnumAccessor { env, object }
 }
 
 pub struct Function<F, A> {
