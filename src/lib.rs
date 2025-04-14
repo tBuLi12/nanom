@@ -10,7 +10,7 @@ use std::{
 pub mod napi;
 pub mod typing;
 
-pub use nanom_derive::{FromJs, IntoJs, JsObject, TsType};
+pub use nanom_derive::{AsJs, FromJs, IntoJs, TsType};
 use typing::{Type, TypeRef, Undefined};
 
 #[macro_export]
@@ -60,6 +60,12 @@ pub trait TsType {
         TypeRef {
             get_type: Self::ts_type,
         }
+    }
+}
+
+impl<T: TsType> TsType for &T {
+    fn ts_type() -> Type {
+        T::ts_type()
     }
 }
 
@@ -161,12 +167,6 @@ impl TsType for &str {
 impl IntoJs for &str {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         unsafe { env.create_string(&self) }.map_err(ConversionError::Napi)
-    }
-}
-
-impl TsType for &String {
-    fn ts_type() -> Type {
-        Type::String
     }
 }
 
@@ -457,24 +457,6 @@ where
     }
 }
 
-impl<T> TsType for &Vec<T>
-where
-    for<'a> &'a T: IntoJs,
-{
-    fn ts_type() -> Type {
-        Type::Array(Box::new(<&T>::ts_type_ref()))
-    }
-}
-
-impl<T> IntoJs for &Vec<T>
-where
-    for<'a> &'a T: IntoJs,
-{
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        <&[T] as IntoJs>::into_js(self, env)
-    }
-}
-
 impl<T: FromJs> FromJs for Vec<T> {
     fn from_js(env: napi::Env, value: napi::Value) -> Result<Self, ConversionError> {
         let len = unsafe { env.get_array_len(value)? };
@@ -504,27 +486,6 @@ impl<T: FromJs> FromJs for Option<T> {
         }
 
         Ok(Some(T::from_js(env, value)?))
-    }
-}
-
-impl<T> TsType for &Option<T>
-where
-    for<'a> &'a T: TsType,
-{
-    fn ts_type() -> Type {
-        Type::Optional(Box::new(<&T>::ts_type_ref()))
-    }
-}
-
-impl<T> IntoJs for &Option<T>
-where
-    for<'a> &'a T: IntoJs,
-{
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        match self {
-            Some(value) => value.into_js(env),
-            None => Null.into_js(env),
-        }
     }
 }
 
@@ -582,24 +543,6 @@ impl<T: FromJs, const N: usize> FromJs for [T; N] {
     }
 }
 
-impl<T, const N: usize> TsType for &[T; N]
-where
-    for<'a> &'a T: IntoJs,
-{
-    fn ts_type() -> Type {
-        Type::Tuple(vec![<&T>::ts_type_ref(); N])
-    }
-}
-
-impl<T, const N: usize> IntoJs for &[T; N]
-where
-    for<'a> &'a T: IntoJs,
-{
-    fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
-        <&[T] as IntoJs>::into_js(self, env)
-    }
-}
-
 impl<T: IntoJs, const N: usize> IntoJs for [T; N] {
     fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
         let array = unsafe { env.create_array_with_length(N) }?;
@@ -629,12 +572,6 @@ impl FromJs for *mut [u8] {
 macro_rules! impl_into_js_ref {
     ($($type_name:ty),*$(,)?) => {
         $(
-            impl TsType for &$type_name {
-                fn ts_type() -> Type {
-                    <$type_name as TsType>::ts_type()
-                }
-            }
-
             impl IntoJs for &$type_name {
                 fn into_js(self, env: napi::Env) -> Result<napi::Value, ConversionError> {
                     IntoJs::into_js(*self, env)
